@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM 設定 portable git 路徑（你解壓的位置）
 set GIT_BIN=C:\Program Files\Git\cmd\git.exe
 
