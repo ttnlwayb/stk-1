@@ -23,12 +23,12 @@ def calc(df, window=60, power_sum_point=4000):
     df['3k_diff_sum_power'] = close_diff_3k - np.floor(power_sum / power_sum_point)
     df['3k_diff_sum_power_shift'] = df['3k_diff_sum_power'].shift(1).fillna(0)
 count = 0
-def calc_profit(df, power_sum_point=4000, start_diff_point=6):
+def calc_profit(df, power_sum_point=4000, start_diff_point = 6, start_diff_point_2 = 6):
     global count
     state = 0
     profits = []
     stop_profit = 25
-    move_profit_point = 1.58
+    move_profit_point = 1.47
     stop_loss = 15
     target_price = 0
     wait = 0
@@ -39,12 +39,26 @@ def calc_profit(df, power_sum_point=4000, start_diff_point=6):
             wait -= 1
             continue
         if state == 0:
-            power_ratio = row['Power_sum'] / (power_sum_point * start_diff_point)
-            start_diff = 6 - math.floor(power_ratio)
+            if _ < 4:
+                continue
+            pre_row = df.iloc[ _ - 1]
+            second_row = df.iloc[ _ - 2]
+            third_row = df.iloc[ _ - 3]
+            pwer_sum = row['Power_sum']
+            pwer_sum_abs = abs(pwer_sum)
+            power_sum_wei = np.floor(pwer_sum / 100000)
+            _3k_change = pre_row['Low'] - third_row['High'] - power_sum_wei
+            _2k_change = row['Low'] - second_row['High'] - power_sum_wei
+            #power_ratio = pwer_sum_abs / (power_sum_point * start_diff_point)
+            start_diff = start_diff_point_2 - math.floor(pwer_sum_abs / 150000)
+            start_diff2 = 20
             cond1 = row['Power_sum'] > 0
             cond2 = row['Power_sum_max_diff'] <= 30000
             cond3 = row['3k_diff_sum_power_shift'] <= -30
+            cond3 = _3k_change <= -30
+            cond32 = _2k_change <= -20
             cond4 = (row['Close'] - row['Low']) >= start_diff
+            cond42 = (row['Close'] - row['Low']) >= start_diff2
             if np.array([cond1, cond2, cond3, cond4]).all():
                 prior_max_idx = [i for i in max_zero_idx if i <= _]
                 if prior_max_idx:
@@ -55,12 +69,24 @@ def calc_profit(df, power_sum_point=4000, start_diff_point=6):
                 if start_diff < 0:
                     start_diff = 0
                 entry_price = row['Low'] + start_diff
+                target_price = entry_price
                 if start_diff < 1:
                     entry_price = row['Open']
+                    target_price = row['High']
                     if (row['High'] - row['Open']) >= stop_profit:
-                        profits.append(stop_profit)
+                        profits.append(stop_profit - 4)
                         wait = wait_default
                         continue
+                state = 1
+                profits.append(entry_price)
+            elif np.array([cond1, cond2, cond32, cond42]).all() and 1 == 2:
+                prior_max_idx = [i for i in max_zero_idx if i <= _]
+                if prior_max_idx:
+                    max_idx = prior_max_idx[-1]
+                    if _ - max_idx > 30:
+                        continue
+                count += 1
+                entry_price = row['Low'] + start_diff2
                 state = 1
                 target_price = entry_price
                 profits.append(entry_price)
@@ -78,32 +104,50 @@ def calc_profit(df, power_sum_point=4000, start_diff_point=6):
             target_price = max(target_price, row['High'])
             # 判斷是否停利
             if (target_price - entry_price) >= stop_profit:
-                profits[-1] = stop_profit
+                state = 2
+                continue
+                #profits[-1] = stop_profit
+                #state = 0
+                #wait = wait_default
+        elif state == 2:
+            diff = 4
+            if target_price - row['Low'] >= diff:
+                profits[-1] = target_price - entry_price - diff
                 state = 0
                 wait = wait_default
+            target_price = max([target_price, row['High']])
     # 避免極大異常值
     if profits and profits[-1] > 10000:
         profits.pop()
         count -= 1
     return np.sum(profits)
 
-def run(window = 60, power_sum_point = 4000, start_diff_point = 6):
-    global count
+files = {}
+def run(window = 60, power_sum_point = 4000, start_diff_point = 6, start_diff_point_2 = 6):
+    global count, files
     res = 0
     count = 0
     for filename in os.listdir(folder_path):
         if filename.endswith('.csv') and '_calc' not in filename:
-            if 'Daily_2025_04'not in filename:
+            if 'Daily_2025_0'not in filename:
                 continue
             #if '0845to1345' in filename:
             #    continue
             # print(f"{filename}: ")
-            file_path = os.path.join(folder_path, filename)
-            df = pd.read_csv(file_path)
+            if files.get(filename) is None:
+                file_path = os.path.join(folder_path, filename)
+                df = pd.read_csv(file_path)
+                files[filename] = df
+            else:
+                df = files[filename]
             calc(df, window = window, power_sum_point=power_sum_point)
-            res += calc_profit(df, power_sum_point=power_sum_point, start_diff_point = start_diff_point)
-            base_name = os.path.splitext(filename)[0]
-            df.to_csv(os.path.join(folder_path, f"{base_name}_calc.csv"), index=False)
+            res += calc_profit(df, 
+                power_sum_point=power_sum_point, 
+                start_diff_point = start_diff_point,
+                start_diff_point_2 = start_diff_point_2
+            )
+            #base_name = os.path.splitext(filename)[0]
+            #df.to_csv(os.path.join(folder_path, f"{base_name}_calc.csv"), index=False)
     #print(f"res {res}")
     #print(f"count {count}")
     #print(f"avg {res / count}")
